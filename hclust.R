@@ -4,6 +4,7 @@ rm(list=ls())
 #Server
 
 load('xdist.rda')
+#load('temp.rda')
 #xhc <- hclust(xdist)
 
 cluster <- function(xdist,members=NULL){
@@ -29,6 +30,12 @@ cluster <- function(xdist,members=NULL){
   return(list(xtree=xtree,xdists=xdists))
 }
 
-system.time(rlt <- cluster(xdist))
-i <- which(sapply(rlt$xtree,length)==max(sapply(rlt$xtree,length)))
-system.time(rltsub <- cluster(rlt$xdists[[i]],members=rlt$xtree[[i]]))
+rlt <- cluster(xdist)
+while(max(sapply(rlt$xtree,length))>200){
+  i <- which(sapply(rlt$xtree,length)==max(sapply(rlt$xtree,length)))[1]
+  system.time(rltsub <- cluster(rlt$xdists[[i]],members=rlt$xtree[[i]]))
+  rlt$xtree <- c(rlt$xtree[-i],rltsub$xtree)
+  rlt$xdists <- c(rlt$xdists[-i],rltsub$xdists)
+  print(sapply(rlt$xtree,length))
+}
+
