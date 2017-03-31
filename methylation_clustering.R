@@ -67,3 +67,7 @@ rlt <- lapply(data,function(x){
   print(i<<-i+1)
   return(cluster2(1-x$cmax))
 })
+
+
+
+
