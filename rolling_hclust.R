@@ -4,7 +4,7 @@ rm(list=ls())
 #Server
 
 load('x.rda')
-system.time(xdist <- cor(t(x)))
+system.time(xdist <- 1-cor(t(x)))
 #load('xdist.rda')
 #load('temp.rda')
 #xhc <- hclust(xdist)
