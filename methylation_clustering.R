@@ -13,3 +13,5 @@ data <- lapply(f,function(x){
   list(raw=raw,cmax=cmax,dmax=dmax)                    
 })
 
+setwd('/home/zhu/rushdata/expression_clustering')
+save(data,file='methylation_cmax_dmax.rda')
