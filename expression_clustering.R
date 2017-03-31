@@ -44,5 +44,25 @@ cluster2 <- function(xdist){
   }
   return(rlt)
  }
- 
- rlt.clustering <- cluster2(xdist)
+
+cluster_label <- function(xdist,xcluster){
+  xcluster <- do.call(rbind,lapply(1:length(xcluster),function(i){
+    cbind(i,xcluster[[i]])
+  }))
+  xcluster <- as.numeric(xcluster[match(colnames(xdist),xcluster[,2]),1])
+  xcluster
+}
+
+cluster_validation <- function(xdist,xcluster){
+  sapply(unique(xcluster),function(j){
+    js <- which(xcluster==j)
+    c(mean(xdist[js,js]),mean(xdist[js,-js]))
+  })
+}
+
+#########################
+
+rlt.clustering <- cluster2(xdist)
+rlt.label <- cluster_label(xdist,rlt.clustering$xtree)
+rlt.vali <- cluster_validation(xdist,rlt.label)
+
