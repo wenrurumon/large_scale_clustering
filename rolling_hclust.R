@@ -3,11 +3,13 @@ rm(list=ls())
 
 #Server
 
-load('xdist.rda')
+load('x.rda')
+system.time(xdist <- cor(t(x)))
+#load('xdist.rda')
 #load('temp.rda')
 #xhc <- hclust(xdist)
 
-cluster <- function(xdist,members=NULL){
+cluster <- function(xdist,members=NULL,speed=2){
   if(is.matrix(xdist)){
     mdist <- xdist
     xdist <- as.dist(xdist)
@@ -20,8 +22,8 @@ cluster <- function(xdist,members=NULL){
     xdist2 <- as.dist(mdist[attr(xdist,"Labels")%in%members,attr(xdist,"Labels")%in%members,drop=F])
   }
   xhc <- hclust(xdist2)
-  xtree <- cutree(xhc,2)
-  xtree <- lapply(1:2,function(i){
+  xtree <- cutree(xhc,speed)
+  xtree <- lapply(1:speed,function(i){
     names(which(xtree==i))
    })
   xdists <- lapply(xtree,function(x){
