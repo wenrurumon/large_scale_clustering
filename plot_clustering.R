@@ -40,3 +40,9 @@ ggheatmap <- function(dat,dimnames=NULL,col=c('white','white','steelblue')){
 
 ggheatmap(dat,col=c('gray','white','red'))
 
+heatmap(t(single_plot),Rowv=NA,
+        col=colorRampPalette(c("green",'black',"red"))(80),
+        labCol=F,
+        scale=c('row','column',"none"),
+        margins=c(7,4))
+
