@@ -267,9 +267,25 @@ load("C:/Users/zhu2/Documents/getpathway/model20170215/expression_clustering/exp
 ###########################################################
 
 expinpath <- lapply(exprincluster[[2]],scale)
-for(i in 1:length(expinpath)){
+mp <- c()
+rlt <- list()
+library(R.utils)
+
+test <- function(i){
   print(i)
   Yi <- expinpath[[i]]
   Yisem <- sparse_2sem(Y=Yi,lambda=0.3)
-  Yicnif <- CNIF(data=Yi,init.adj=Yisem[[1]],max_parents=3)
+  gc()
+  Yicnif <- try(evalWithTimeout(CNIF(data=Yi,init.adj=Yisem[[1]],max_parent=3),timeout=120));gc()
+  if(!is.matrix(Yicnif)){
+    Yicnif <- try(evalWithTimeout(CNIF(data=Yi,init.adj=Yisem[[1]],max_parent=2),timeout=120));gc()
+  }
+  try(plotnet(Yicnif))
+  return(Yicnif)
+}
+# for(i in 1:length(expinpath)){
+for(i in 1:length(expinpath)){
+  Yicnif <- try(test(i))
+  gc()
+  rlt[[i]] <- Yicnif
 }
