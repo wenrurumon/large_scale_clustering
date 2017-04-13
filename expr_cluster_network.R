@@ -1,113 +1,217 @@
 
-setwd('C:\\Users\\zhu2\\Documents\\getpathway\\model20170215\\expression_clustering')
-load('expr_cluster.rda')
-load('C:\\Users\\zhu2\\Documents\\getpathway\\model20170215\\disease.rda')
-library(data.table)
-library(dplyr)
-# 
-# library(GenABEL)
-# scale_ivn <- function(x){apply(x,2,rntransform)}
-# qpca <- function(A,rank=0,ifscale=F){
-#   if(!ifscale){A <- scale_ivn(A)}else{A <- scale(A)[,]}
-#   A.svd <- svd(A)
-#   if(rank==0){
-#     d <- A.svd$d
-#   } else {
-#     d <- A.svd$d-A.svd$d[min(rank+1,nrow(A),ncol(A))]
-#   }
-#   d <- d[d > 1e-10]
-#   r <- length(d)
-#   prop <- d^2; prop <- cumsum(prop/sum(prop))
-#   d <- diag(d,length(d),length(d))
-#   u <- A.svd$u[,1:r,drop=F]
-#   v <- A.svd$v[,1:r,drop=F]
-#   x <- u%*%sqrt(d)
-#   y <- sqrt(d)%*%t(v)
-#   z <- x %*% y
-#   rlt <- list(rank=r,X=x,Y=y,Z=x%*%y,prop=prop)
-#   return(rlt)
-# }
-# 
-# qpca2 <- function(A,ifscale){
-#   if(ncol(A)==1){return(cbind(scale(A)[,]))}
-#   A.pca <- qpca(A,ifscale=ifscale)
-#   A.qpca <- qpca(A,rank=which(A.pca$prop>=0.9)[1],ifscale=ifscale)
-#   A.qpca$X[,1:which(A.qpca$prop>=0.9)[1],drop=F]
-# }
-# 
-# expr_cluster <- lapply(expr_cluster,function(x){
-#   x <- x[match(disease$projid,rownames(x)),,drop=F]
-#   x[,apply(x,2,var)>0,drop=F]
-# })
-# 
-# expr_cluster <- lapply(expr_cluster,function(x){
-#   qpca2(x,ifscale=T)
-# })
+rm(list=ls())
 
-# i <- 0
-# ccap_mat <- sapply(expr_cluster2,function(x){
-#   print(i<<-i+1)
-#   sapply(expr_cluster2,function(y){
-#     ccap(x,y)
-#   })
-# })
+#################################
+# SEM-Preprocess
+#################################
 
-#######################
-#SEM
-#######################
-
-source('C:\\Users\\zhu2\\Documents\\sample_grouplasso_network\\scr\\grpsem.R')
-system.time(test <- grpsem(expr_cluster[1:5],lambda=0.7))
-plot(graph_from_adjacency_matrix(t(test)))
-
-########################
-
-library(flare)
-Y <- expr_cluster
-
-groups <- seq(1,662,20)
-groups[length(groups)] <- 662
-groups <- lapply(2:length(groups)-1,function(i){groups[[i]]:groups[[i+1]]})
-
-#grpslim
-tryout <- function(sel){
-  Ymat.datai <- data4sem(y=y,x=x[sel])
-  test <- slim(X=Ymat.datai$x,Y=Ymat.datai$
-                 y,lambda=0.5)
-  tapply(test$beta0[[1]]!=0,Ymat.datai$index,any)
+#bind to array
+abind <- function(...){
+  x <- list(...)
+  rlt <- array(NA,dim=c(dim(x[[1]]),length(x)))
+  for (i in 1:length(x)){rlt[,,i]<-x[[i]]}
+  return(rlt)
 }
 
-test.slim <- lapply(1:5,function(i){
-  print(i)
-  y <- Y[[i]]
-  x <- Y[-i]
-  out <- lapply(groups[1:5],function(sel){
-    try(tryout(sel))
+#ADJ aggregation
+adj.group <- function(dag,Y.group){
+  dag.group <- matrix(0,max(Y.group),max(Y.group))
+  for(i in 1:nrow(dag.group)){
+    for(j in 1:ncol(dag.group)){
+      dag.group[j,i] <- sum(apply(dag[Y.group==i,Y.group==j,drop=F],1,max))
+    }
+  }
+  return(dag.group)
+}
+
+#single directed score
+mat.sds <- function(dag.group){
+  dag_sel <- apply(abind(dag.group,t(dag.group)),1:2,function(x){which(x==max(x))[1]})
+  dag.group[dag_sel==2] <- 0; diag(dag.group) <- 0
+  dag.group
+}
+
+#################################
+# SEM-Undirected Structure
+#################################
+
+#SEM L1
+sem_l1 <- function(Y,lambda=0.1,times=10){
+  adjs <- lapply(1:times,function(i){
+    Y <- Y[sample(1:nrow(Y),nrow(Y)*2/3),]
+    adj <- do.call(rbind,lapply(1:ncol(Y),function(i){
+      slimi <- slim(X=Y[,-i],Y=Y[,i],lambda=lambda,
+                    rho=1,method='lasso',verbose=FALSE)
+      temp <- rep(FALSE,ncol(Y))
+      temp[-i][which(slimi$beta!=0)] <- TRUE
+      temp
+    }))
   })
+  adj <- apply(do.call(abind,adjs),1:2,mean)
+  return(adj)
+}
+
+#SEM Group Lasso
+sem_grplasso <- function(Y
+                         ,Y.group=rep(1:ncol(Y))
+                         ,Y.prop=(1/tapply(Y.group,Y.group,length))[Y.group]
+                         ,lambda=.1,times=10){
+  adjs <- lapply(1:times,function(i){
+    Y <- Y[sample(1:nrow(Y),nrow(Y)*2/3),]
+    adj <- do.call(rbind,lapply(1:ncol(Y),function(i){
+      lambda <- lambdamax(x=cbind(1,Y[,-i]),y=Y[,i], 
+                          index=c(NA,Y.group[-i]), 
+                          penscale = sqrt, model = LinReg(),
+                          center=TRUE,standardized=TRUE) * 0.5^(1/lambda-1)
+      fit <- grplasso(x=cbind(1,Y[,-i]),y=Y[,i],
+                      index=c(NA,Y.group[-i]),lambda=lambda,model=LinReg(),
+                      penscale = sqrt,
+                      control = grpl.control(update.hess = "lambda", trace = 0))
+      temp <- rep(0,ncol(Y))
+      temp[-i] <- coef(fit)[-1]
+      temp!=0
+    }))
+  })
+  adj <- apply(do.call(abind,adjs),1:2,mean)
+  return(adj)
+}
+
+#SEM L1 with parameter estimation and X connected
+sem_l1_YX <- function(Y,X=NULL,adj=NULL,lambda=0.1,times=10,stability=0.8){
+  #Lasso Network cross Y
+  if(is.null(adj)|is.null(X)){
+    adjs <- lapply(1:times,function(i){
+      Y <- Y[sample(1:nrow(Y),nrow(Y)*2/3),]
+      adj <- do.call(rbind,lapply(1:ncol(Y),function(i){
+        slimi <- slim(X=Y[,-i],Y=Y[,i],lambda=lambda,
+                      rho=1,method='lasso',verbose=FALSE)
+        temp <- rep(FALSE,ncol(Y))
+        temp[-i][which(slimi$beta!=0)] <- TRUE
+        temp
+      }))
+    })
+    adj <- apply(do.call(abind,adjs),1:2,mean)
+    dimnames(adj) <- list(colnames(Y),colnames(Y))
+  }
   
+  #Parameter Estimation
+  if(is.null(X)){
+    model <- lapply(1:nrow(adj),function(i){
+      yi <- Y[,adj[i,]>=stability,drop=F]
+      if(length(yi)==0){return(NULL)}
+      yi.coef <- ginv(t(yi)%*%yi) %*% t(yi) %*% Y[,i]  
+      yi.sigma <- (1/nrow(yi))*sum((Y[,i]-yi%*%yi.coef)^2)
+      yi.SIGMA <- yi.sigma * ginv(t(yi)%*%yi)
+      yi.pvalue <- pchisq(as.vector(yi.coef^2)/diag(yi.SIGMA),df=1,lower.tail=FALSE)
+      data.frame(y=colnames(Y)[i],x=colnames(yi),coef=as.vector(yi.coef),pvalue=yi.pvalue)
+    })
+    model <- do.call(rbind,model)
+    #Model Output
+    return(list(adj=adj,model=model))
+  } 
   
+  #Connection with X
+  adjs <- lapply(1:times,function(timei){
+    if(times>1){
+      sampleset <- sample(1:nrow(Y),nrow(Y)/2)
+      Y <- Y[sampleset,,drop=F]; X <- X[sampleset,,drop=F]
+    }
+    Xinv<-ginv(t(X)%*%X)
+    Yhat<-X%*%Xinv%*%t(X)%*%Y
+    adj <- t(sapply(1:ncol(Y),function(k){
+      Xk <- as.matrix(cbind(Yhat[,-k],X))
+      outl1=slim(X=Xk[,apply(Xk,2,var)!=0],Y=Y[,k],lambda=lambda,
+                 rho=1,method = "lasso",verbose=FALSE)
+      temp <- rep(FALSE,ncol(Y)+ncol(X))
+      temp[-k][apply(Xk,2,var)!=0] <- outl1$beta!=0
+      temp
+    }))
+    return(adj)
+  })
+  adjYX <- apply(do.call(abind,adjs),1:2,mean)
+  dimnames(adjYX) <- list(colnames(Y),c(colnames(Y),colnames(X)))
+  # adjYX[,1:ncol(Y)] <- apply(abind(adj,adjYX[,1:ncol(Y)]),1:2,max)
+  adjYX[,1:ncol(Y)] <- adj
+  
+  #Parameter Estimatin
+  model <- do.call(rbind,lapply(1:nrow(adjYX),function(i){
+    yi <- cbind(Y,X)[,adjYX[i,]>=stability,drop=F]
+    if(length(yi)==0){return(NULL)}
+    yi.coef <- ginv(t(yi)%*%yi) %*% t(yi) %*% Y[,i]  
+    yi.sigma <- (1/nrow(yi))*sum((Y[,i]-yi%*%yi.coef)^2)
+    yi.SIGMA <- yi.sigma * ginv(t(yi)%*%yi)
+    yi.pvalue <- pchisq(as.vector(yi.coef^2)/diag(yi.SIGMA),df=1,lower.tail=FALSE)
+    data.frame(y=colnames(Y)[i],x=colnames(yi),coef=as.vector(yi.coef),pvalue=yi.pvalue)
+  }))
+  
+  #Model Output
+  return(list(adj=adjYX,model=model))
+}
 
-})
-test.slim <- do.call(rbind,test.slim)+0
+#grouplasso model with L1 regulazation applied
+sem_grplasso2 <- function(Y
+                          ,Y.group=rep(1:ncol(Y))
+                          ,Y.prop=(1/tapply(Y.group,Y.group,length))[Y.group]
+                          ,lambda1=.5,lambda2=.3,times=10,stability=.8){
+  #Group Lasso Network
+  sem1 <- sem_grplasso(Y,Y.group,lambda=lambda1,times=times)
+  adj <- (sem1>=stability)
+  #L1 Penalty
+  adjs <- lapply(1:times,function(i){
+    Y <- Y[sample(1:nrow(Y),nrow(Y)*2/3),]
+    adj <- do.call(rbind,lapply(1:nrow(adj),function(j){
+      temp <- adj[j,]
+      if(sum(temp)==0){return(temp)}
+      Yj <- Y[,j,drop=F]
+      Xj <- Y[,temp,drop=F]
+      slimi <- slim(X=Xj,Y=Yj,lambda=lambda2,rho=1,method='lasso',verbose=FALSE)
+      temp[temp] <- (slimi$beta!=0)
+      return(temp)
+    }))
+    return(adj)
+  })
+  sem2 <- apply(do.call(abind,adjs),1:2,mean)
+  #Result
+  list(sem_l1=sem1,sem_grplasso=sem2)
+}
 
-#########################################
 
-setwd('C:\\Users\\zhu2\\Documents\\getpathway\\model20170215\\expression_clustering')
-load('expr_cluster.rda')
-load('C:\\Users\\zhu2\\Documents\\getpathway\\model20170215\\disease.rda')
-library(data.table)
-library(dplyr)
+#####################################################
+# Preprocess
+#####################################################
 
-expr_cluster2 <- sapply(expr_cluster,rowMeans)
-dim(expr_cluster2)
+qpca <- function(A,rank=0,ifscale=TRUE){
+  if(ifscale){A <- scale(as.matrix(A))[,]}
+  A.svd <- svd(A)
+  if(rank==0){
+    d <- A.svd$d
+  } else {
+    d <- A.svd$d-A.svd$d[min(rank+1,nrow(A),ncol(A))]
+  }
+  d <- d[d > 1e-8]
+  r <- length(d)
+  prop <- d^2; info <- sum(prop)/sum(A.svd$d^2);prop <- cumsum(prop/sum(prop))
+  d <- diag(d,length(d),length(d))
+  u <- A.svd$u[,1:r,drop=F]
+  v <- A.svd$v[,1:r,drop=F]
+  x <- u%*%sqrt(d)
+  y <- sqrt(d)%*%t(v)
+  z <- x %*% y
+  rlt <- list(rank=r,X=x,Y=y,Z=x%*%y,prop=prop,info=info)
+  return(rlt)
+}
+pca <- function(X){
+  X <- scale(as.matrix(X))
+  m = nrow(X)
+  n = ncol(X)
+  Xeigen <- svd(X)
+  value <- (Xeigen$d)^2/m
+  value <- cumsum(value/sum(value))
+  score <- X %*% Xeigen$v
+  mat <- Xeigen$v
+  list(score=score,prop=value,mat=mat)
+}
 
-test <- sapply(1:663,function(i){
-  print(i)
-  test <- flare::slim(X=expr_cluster2[,-i],Y=expr_cluster2[,i],lambda=0.2)
-  out <- rep(FALSE,663)
-  out[-i] <- (test$beta!=0)
-  out
-})
 plotnet <- function(x,mode='undirected'){
   diag(x) <- 0
   plot(graph_from_adjacency_matrix(t(x),mode=mode),
@@ -116,6 +220,163 @@ plotnet <- function(x,mode='undirected'){
        vertex.label.cex=1,
        edge.width=.1)
 }
-plotnet(test)
-undnet633 <- test
-save(undnet633,file='undnet633.rda')
+fc <- function(x){
+  w<-as.vector(t(x))[t(x)>0]
+  x <- graph_from_adjacency_matrix(x>0,mode='undirected')
+  fc <- membership(fastgreedy.community(x,weight=w))
+  fc[] <- match(fc,unique(fc))
+  fc
+}
+plotclust <- function(x,membership=NULL){
+  G <- graph_from_adjacency_matrix(x>0)
+  if(is.null(membership)){membership=rep(1,ncol(x))}
+  plot(create.communities(G, membership), 
+       # as.undirected(G), 
+       as.directed(G),
+       layout=layout.kamada.kawai(as.undirected(G)),
+       edge.arrow.size=.1,
+       vertex.size=3,
+       vertex.label.cex=1,
+       edge.width=.1)
+}
+qpca2 <- function(x){
+  x <- x[,apply(x,2,var)>0,drop=F]
+  if(ncol(x)==1){return(x)}
+  x1 <- which(qpca(x)$prop>=0.9)[1]
+  if(x1<ncol(x)){
+    x2 <- qpca(x,rank=x1)
+  } else {
+    x2 <- qpca(x)
+  }
+  x2$X[,1:which(x2$prop>=0.9)[1],drop=F]
+}
+sparse_2sem2 <- function(Y,lambda){
+  if(ncol(Y)<=1){
+    out <- matrix(0,1,1,dimnames=list(colnames(Y),colnames(Y)))
+    return(out)
+  }
+  lambdai <- lambda-0.1
+  out <- 1
+  while(((sum((out+t(out))>0)/2)/length(out)>0.15)&lambdai<5){
+    lambdai <- lambdai + 0.1
+    out <- sparse_2sem(Y=Y,lambda=lambda)[[1]]
+    print(lambdai)
+  }
+  return(out)
+}
+mean2 <- function(x){
+  (sum((x+t(x))>0)/2)/length(x)
+}
+
+###########################################################
+# Input data
+###########################################################
+
+# load('network_per_group.rda')
+setwd('C:\\Users\\zhu2\\Documents\\signaling\\codes\\')
+source('sparse_2sem_final.R')
+source('local_cnif_macro.R')
+source('CNIF.R')
+sourceCpp("score_function_regression.cpp")
+sourceCpp("simple_cycle.cpp")
+sourceCpp("initial_sem.cpp")
+setwd('C:\\Users\\zhu2\\Documents\\sample_grouplasso_network')
+sourceCpp("scr\\score_function_regression.cpp")
+sourceCpp("scr\\simple_cycle.cpp")
+sourceCpp("scr\\initial_sem.cpp")
+source("scr\\local_cnif_macro.R")
+source("scr\\grpsem.R")
+library(flare)
+library(grplasso)
+library(data.table)
+library(dplyr)
+library(igraph)
+load("C:/Users/zhu2/Documents/getpathway/model20170215/expression_clustering/expr_cluster_list.rda")
+
+###########################################################
+# Test
+###########################################################
+
+expinpath <- lapply(exprincluster[[2]],scale)
+pid <- rownames(exprincluster[[1]][[1]])
+mp <- c()
+rlt <- list()
+library(R.utils)
+library(igraph)
+
+test <- function(i){
+  Yi <- expinpath[[i]]
+  Yi <- Yi[match(pid,rownames(Yi)),,drop=F]
+  # Yi <- lm(Yi~pca(Yi)$score[,1:which(pca(Yi)$prop>=0.3)[1],drop=F])$residuals
+  Yisem <- sparse_2sem(Yi,lambda=0.3)[[1]]
+  Yigroup <- cluster_walktrap(graph_from_adjacency_matrix(t(Yisem)))
+  Yij <- lapply(unique(Yigroup$membership),function(j){
+    qpca2(Yi[,Yigroup$membership==j,drop=F])
+  })
+  Yicnif <- model(Yij,lambda=0.6); plotnet(Yicnif)
+  Yij <- lapply(unique(Yigroup$membership),function(j){
+    (Yi[,Yigroup$membership==j,drop=F])
+  })
+  Yijsem <- lapply(Yij,function(y){
+    init.adj <- try(sparse_2sem2(y,lambda=0.4))
+    if(class(init.adj)=="try-error"){
+      init.adj <- matrix(0,ncol(y),ncol(y),dimnames=list(colnames(y),colnames(y)))
+    }
+    init.adj
+  })
+  Yijcnif <- lapply(1:length(Yij),function(i){
+    gc()
+    if(mean2(Yijsem[[i]])<=0.2){
+      out <- try(CNIF(data=Yij[[i]],init.adj=Yijsem[[i]],max_parent = 3));gc()
+      if(class(out)=='try-error'){
+        out <- try(CNIF(data=Yij[[i]],init.adj=Yijsem[[i]],max_parent = 2));gc()
+      }
+    } else {
+      out <- try(CNIF(data=Yij[[i]],init.adj=Yijsem[[i]],max_parent = 2));gc()
+      if(class(out)=='try-error'){
+        out <- try(CNIF(data=Yij[[i]],init.adj=Yijsem[[i]],max_parent=1));gc()
+      }
+    }
+    return(out)
+  })
+  # j <- 1
+  Yout <- lapply(1:length(Yij),function(j){
+    print(j)
+    yij <- Yij[[j]]; yfixed <- Yijcnif[[j]]
+    xij <- Yij[unique(Yigroup$membership)[Yicnif[j,]>0]]
+    if(length(yfixed)==1){
+      yij <- cbind(Yij,Yij); yfixed <- matrix(0,2,2)
+    }
+    out <- try(sparse_2sem(yij,Y.fixed = yfixed,X=do.call(cbind,xij),lambda=0.4))[[1]]
+    return(out)
+  })
+  Yout[sapply(Yout,is.matrix)]
+}
+
+
+test2 <- function(i){
+  Yi <- expinpath[[i]]
+  Yi <- Yi[match(pid,rownames(Yi)),,drop=F]
+  Yi <- lm(Yi~pca(Yi)$score[,1:which(pca(Yi)$prop>=0.3)[1],drop=F])$residuals
+  Yisem <- sparse_2sem(Yi,lambda=0.1)[[1]]
+  Yicnif <- try(CNIF(data=Yi,init.adj=Yisem,max_parent = 3));gc()
+  if(!is.matrix(Yicnif)){
+    Yicnif <- try(CNIF(data=Yi,init.adj=Yisem,max_parent = 2));gc()
+  }
+  if(!is.matrix(Yicnif)){
+    Yicnif <- try(CNIF(data=Yi,init.adj=Yisem,max_parent = 1));gc()
+  }
+  plotnet(Yicnif)
+  Yicnif
+}
+
+#################################
+# Project
+#################################
+
+load('C:/Users/zhu2/Documents/getpathway/model20170215/expression_clustering/temp2.rda')
+# rlt <- list()
+for(i in (length(rlt)+1):length(expinpath)){
+  rlt[[i]] <- try(test2(i))
+  save(rlt,file='C:/Users/zhu2/Documents/getpathway/model20170215/expression_clustering/temp2.rda')
+}
