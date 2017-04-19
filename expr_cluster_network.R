@@ -1,5 +1,4 @@
 
-rm(list=ls())
 
 #################################
 # SEM-Preprocess
@@ -297,8 +296,12 @@ load("C:/Users/zhu2/Documents/getpathway/model20170215/expression_clustering/exp
 # Test
 ###########################################################
 
-expinpath <- lapply(exprincluster[[2]],scale)
 pid <- rownames(exprincluster[[1]][[1]])
+expinpath <- lapply(exprincluster[[2]],function(Yi){
+  Yi <- Yi[match(pid,rownames(Yi)),,drop=F]
+  Yi <- Yi[,apply(Yi,2,var)>0,drop=F]
+  scale(Yi)[,]
+})
 mp <- c()
 rlt <- list()
 library(R.utils)
@@ -306,7 +309,6 @@ library(igraph)
 
 test <- function(i){
   Yi <- expinpath[[i]]
-  Yi <- Yi[match(pid,rownames(Yi)),,drop=F]
   # Yi <- lm(Yi~pca(Yi)$score[,1:which(pca(Yi)$prop>=0.3)[1],drop=F])$residuals
   Yisem <- sparse_2sem(Yi,lambda=0.3)[[1]]
   Yigroup <- cluster_walktrap(graph_from_adjacency_matrix(t(Yisem)))
@@ -356,7 +358,6 @@ test <- function(i){
 
 test2 <- function(i){
   Yi <- expinpath[[i]]
-  Yi <- Yi[match(pid,rownames(Yi)),,drop=F]
   Yi <- lm(Yi~pca(Yi)$score[,1:which(pca(Yi)$prop>=0.3)[1],drop=F])$residuals
   Yisem <- sparse_2sem(Yi,lambda=0.1)[[1]]
   Yicnif <- try(CNIF(data=Yi,init.adj=Yisem,max_parent = 3));gc()
@@ -375,8 +376,11 @@ test2 <- function(i){
 #################################
 
 load('C:/Users/zhu2/Documents/getpathway/model20170215/expression_clustering/temp2.rda')
+print(length(rlt)+1)
 # rlt <- list()
 for(i in (length(rlt)+1):length(expinpath)){
+  gc()
   rlt[[i]] <- try(test2(i))
+  gc()
   save(rlt,file='C:/Users/zhu2/Documents/getpathway/model20170215/expression_clustering/temp2.rda')
 }
