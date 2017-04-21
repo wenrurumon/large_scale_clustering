@@ -40,6 +40,7 @@ data <- lapply(f,function(x){
   dmax <- as.matrix(dist(t(raw2)))
   list(raw=raw,cmax=cmax,dmax=dmax)                    
 })
+names(data) <- f
 
 setwd('/home/zhu/rushdata/expression_clustering')
 save(data,file='methylation_cmax_dmax.rda')
