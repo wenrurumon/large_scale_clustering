@@ -1,6 +1,32 @@
 
 rm(list=ls())
 setwd('/home/zhu/rushdata/processed/methylation')
+qpca <- function(A,rank=0,ifscale=TRUE){
+  if(ifscale){A <- scale(as.matrix(A))[,]}
+  A.svd <- svd(A)
+  if(rank==0){
+    d <- A.svd$d
+  } else {
+    d <- A.svd$d-A.svd$d[min(rank+1,nrow(A),ncol(A))]
+  }
+  d <- d[d > 1e-8]
+  r <- length(d)
+  prop <- d^2; info <- sum(prop)/sum(A.svd$d^2);prop <- cumsum(prop/sum(prop))
+  d <- diag(d,length(d),length(d))
+  u <- A.svd$u[,1:r,drop=F]
+  v <- A.svd$v[,1:r,drop=F]
+  x <- u%*%sqrt(d)
+  y <- sqrt(d)%*%t(v)
+  z <- x %*% y
+  rlt <- list(rank=r,X=x,Y=y,Z=x%*%y,prop=prop,info=info)
+  return(rlt)
+}
+qpca2 <- function (A, ifscale = T, l1 = 0.9, l2 = 0.9) 
+{
+    A.pca <- qpca(A)
+    A.qpca <- qpca(A, rank = which(A.pca$prop >= l1)[1])
+    A.qpca$X[, 1:which(A.qpca$prop >= l2)[1], drop = F]
+}
 f <- dir()
 data <- lapply(f,function(x){
   print(x)
@@ -8,8 +34,10 @@ data <- lapply(f,function(x){
   raw <- scale(sapply(pmethy,function(x){
    rowMeans(x$methy)
   }))[,]
-  cmax <- cor(raw)
-  dmax <- as.matrix(dist(t(raw)))
+  raw2 <- t(qpca2(t(raw)))
+  colnames(raw2) <- colnames(raw)
+  cmax <- cor(raw2)
+  dmax <- as.matrix(dist(t(raw2)))
   list(raw=raw,cmax=cmax,dmax=dmax)                    
 })
 
@@ -67,7 +95,7 @@ rlt <- lapply(data,function(x){
   print(i<<-i+1)
   return(cluster2(1-x$cmax))
 })
-
+save(rlt,file='methylation_clustering.rda')
 
 
 
